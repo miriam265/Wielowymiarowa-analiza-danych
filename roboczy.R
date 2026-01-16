@@ -32,137 +32,85 @@ df <- df %>%
   rename_with(~ gsub("\\.[0-4]+\\.", "", .x))
 
 
-df_num <- df[, 11:126]
+#df_num <- df[, 11:126]
 # Make sure all variables are numeric
-df_num <- as.data.frame(lapply(df_num, as.numeric))
+#df_num <- as.data.frame(lapply(df_num, as.numeric))
 
+df_num <- read.csv("df_num.csv")
 
-# Run PCA (with standarization)
-pca <- prcomp(df_num, center = TRUE, scale. = TRUE)
+# wektor lat
+years <- 2019:2023
 
-
-print(pca)
-summary(pca)
-
-# Wykres wartości własnych (procent wyjaśnionej wariancji)
-fviz_eig(pca, 
-         addlabels = TRUE,       # Pokazuje procenty na słupkach
-         ylim = c(0, 30),        # Zakres osi Y (dostosuj jeśli PC1 ma więcej %)
-         main = "Wykres osypiska - Procent wyjaśnionej wariancji")
-
-
-# Funkcja pomocnicza do wyciągania TOP 10 zmiennych dla danej składowej
-pokaz_top_zmienne <- function(nr_skladowej) {
-  # Pobieramy ładunki dla wybranej składowej (kolumna PCx)
-  ladunki <- pca$rotation[, nr_skladowej]
-  
-  # Sortujemy wg siły wpływu (wartość bezwzględna - nieważne czy plus czy minus)
-  top10 <- sort(abs(ladunki), decreasing = TRUE)[1:10]
-  
-  # Wyświetlamy oryginalne wartości (z minusem lub plusem) dla tych topowych
-  wynik <- ladunki[names(top10)]
-  print(paste("--- NAJWAŻNIEJSZE ZMIENNE DLA SKŁADOWEJ PC", nr_skladowej, "---"))
-  print(wynik)
-}
-
-# Wyświetl wyniki dla 4 składowych
-pokaz_top_zmienne(1)
-pokaz_top_zmienne(2)
-pokaz_top_zmienne(3)
-pokaz_top_zmienne(4)
-
-scores <- pca$x
-head(scores,10)
-
-ranking_PC1 <- data.frame(
-  powiat = df$NazwaJST,
-  PC1 = scores[,1]
-)
-
-ranking_PC1 <- ranking_PC1[order(-ranking_PC1$PC1), ]
-
-
-
-# 1. Wybierz 4 główne składowe (Twoje "profile")
-scores <- pca$x[, 1:4]
-
-# 2. Oblicz odległości i drzewo klastrowe (dendrogram)
-d <- dist(scores, method = "euclidean")
-hc <- hclust(d, method = "ward.D2")
-
-# 3. Wyświetl dendrogram, żeby ocenić ile grup wyciąć
-fviz_dend(hc, 
-          k = 3,                 # Ile grup
-          cex = 0.5,             # Wielkość tekstu (nieważne, bo ukrywamy)
-          k_colors = "jco",      # Ładna paleta kolorów
-          rect = TRUE,           # Ramki wokół klastrów
-          rect_border = "jco",   # Kolor ramek
-          rect_fill = TRUE,      # Wypełnienie tła ramek
-          show_labels = FALSE,   # <--- KLUCZOWE: Ukrywamy gąszcz napisów
-          main = "Podział powiatów na grupy (Dendrogram)"
-)
-
-# 4. Podziel na grupy (załóżmy k=4, zmień jeśli wolisz 3)
-k_grup <- 3
-grupy <- cutree(hc, k = k_grup)
-
-# 5. Dodaj numer grupy do swoich oryginalnych danych
-# Zakładam, że Twoja ramka z danymi nazywa się "df" lub "dane"
-df$Cluster <- as.factor(grupy)
-
-# Sprawdź liczebność grup
-table(df$Cluster)
-
-
-
-
-
-# Zdefiniuj funkcję do szybkiego rysowania trendów
-rysuj_trend <- function(dane_wejsciowe, nazwa_wskaznika_prefix, tytul_wykresu) {
-  
-  # 1. Szukamy kolumn pasujących do wzorca (np. zaczynających się od "WL3_")
-  cols <- grep(paste0("^", nazwa_wskaznika_prefix, "_"), names(dane_wejsciowe), value = TRUE)
-  
-  # 2. DIAGNOSTYKA: Jeśli nie znaleziono kolumn, sprawdzamy dlaczego
-  if (length(cols) == 0) {
-    message(paste("❌ BŁĄD: Nie znaleziono kolumn dla prefiksu:", nazwa_wskaznika_prefix))
-    message("Sprawdź, czy w Twoim df nazwy mają format 'PREFIKS_ROK' (z podłogą).")
-    message("Przykładowe nazwy kolumn w Twoim df:")
-    print(head(names(dane_wejsciowe), 10))
-    return(NULL)
+# lista z ramkami danych dla każdego roku
+dfs_by_year <- lapply(
+  years,
+  \(yr) {
+    pat <- paste0("_", yr, "$")
+    cols <- grepl(pat, names(df_num))          # wybierz kolumny danego roku
+    df_num[, cols, drop = FALSE]
   }
+)
+
+# nadaj nazwy elementom listy
+names(dfs_by_year) <- paste0("df_num_", years)
+
+# opcjonalnie: wyciągnij do osobnych obiektów
+df_num_2019 <- dfs_by_year[["df_num_2019"]]
+df_num_2020 <- dfs_by_year[["df_num_2020"]]
+df_num_2021 <- dfs_by_year[["df_num_2021"]]
+df_num_2022 <- dfs_by_year[["df_num_2022"]]
+df_num_2023 <- dfs_by_year[["df_num_2023"]]
+
+# --- KROK 1: Zdefiniuj listę swoich ramek danych dla poszczególnych lat ---
+# Upewnij się, że wpisujesz tu dokładne nazwy zmiennych, które utworzyłeś
+lista_lat <- list(
+  "2019" = df_num_2019,  
+  "2020" = df_num_2020,
+  "2021" = df_num_2021,
+  "2022" = df_num_2022,
+  "2023" = df_num_2023
+)
+
+# --- KROK 2: Funkcja wykonująca tożsamą analizę (skalowanie -> łokieć -> klastry) ---
+wykonaj_analize_roczna <- function(df_input, rok) {
   
-  print(paste("✅ Sukces! Znaleziono", length(cols), "kolumn dla", nazwa_wskaznika_prefix))
+  message(paste("\n--- Rozpoczynam analizę dla roku:", rok, "---"))
   
-  # 3. Przetwarzanie danych (poprawione summarise i across)
-  df_plot <- dane_wejsciowe %>%
-    select(Cluster, all_of(cols)) %>%
-    group_by(Cluster) %>%
-    summarise(across(everything(), ~ mean(.x, na.rm = TRUE))) %>% # Nowa składnia (tylda)
-    pivot_longer(cols = -Cluster, names_to = "Rok", values_to = "Wartosc") %>%
-    mutate(Rok = as.numeric(gsub(".*_", "", Rok))) # Wyciąga rok po "_"
+  # 1. Skalowanie danych (niezbędne dla k-means)
+  df_scaled <- scale(df_input)
   
-  # 4. Rysowanie (zaktualizowane geom_line)
-  ggplot(df_plot, aes(x = Rok, y = Wartosc, color = Cluster, group = Cluster)) +
-    geom_line(linewidth = 1.2) + # 'size' jest przestarzałe, używamy 'linewidth'
-    geom_point(size = 3) +
-    theme_minimal() +
-    labs(title = tytul_wykresu, 
-         subtitle = paste("Średnia wartość w grupach dla:", nazwa_wskaznika_prefix),
-         y = "Wartość wskaźnika") +
-    theme(legend.position = "bottom")
+  # 2. Wyznaczenie optymalnej liczby klastrów (Metoda Łokcia)
+  # To wygeneruje wykres sugerujący liczbę klastrów dla danego roku
+  p_elbow <- fviz_nbclust(df_scaled, kmeans, method = "wss") +
+    labs(subtitle = paste("Metoda łokcia - Rok", rok))
+  print(p_elbow)
+  
+  # 3. Właściwe klastrowanie (K-means)
+  # UWAGA: Tutaj wpisana jest liczba klastrów centers = 4 (standardowo).
+  # Jeśli wykres łokcia dla danego roku sugeruje inną liczbę, zmień ten parametr lub ustaw go dynamicznie.
+  set.seed(123)
+  km_res <- kmeans(df_scaled, centers = 3, nstart = 25)
+  
+  # 4. Wizualizacja klastrów (PCA Biplot)
+  p_cluster <- fviz_cluster(km_res, data = df_scaled,
+                            geom = "point", # lub "point" i "text"
+                            ellipse.type = "convex", 
+                            ggtheme = theme_minimal(),
+                            main = paste("Wizualizacja klastrów - Rok", rok))
+  print(p_cluster)
+  
+  # Zwracamy wynik klastrowania, jeśli chciałbyś go zapisać
+  return(list(model = km_res, dane_skalowane = df_scaled))
 }
 
-# --- WYWOŁANIE FUNKCJI ---
-# Zwróć uwagę, że teraz podajemy 'df' jako pierwszy argument!
+# --- KROK 3: Pętla uruchamiająca analizę dla każdego roku ---
 
-# 1. Zadłużenie (WL3)
-rysuj_trend(df, "WL3", "Dynamika Zadłużenia (Zobowiązania na mieszkańca)")
+wyniki_analizy <- list() # Tu zapiszą się wyniki
 
-# 2. Nadwyżka Operacyjna (WL2 - sprawdź czy masz tę kolumnę, jeśli nie to np. WB3)
-rysuj_trend(df, "WL2", "Zdolność Inwestycyjna (Nadwyżka Operacyjna)")
-
-# 3. Jeśli WL2 nie zadziała, spróbuj WB3 (częsty zamiennik w tych danych)
-rysuj_trend(df, "WB3", "Zdolność Inwestycyjna (Relacja nadwyżki)")
-
-# TU MOŻNA DODAĆ JESZCZE CAŁE MNÓSTWO WYKRESÓW DLA INNYCH WSKAŹNIKÓW
+for (rok in names(lista_lat)) {
+  # Wywołanie funkcji dla konkretnego roku
+  wyniki_analizy[[rok]] <- wykonaj_analize_roczna(lista_lat[[rok]], rok)
+  
+  # Opcjonalnie: dodaj pauzę, żeby zdążyć zobaczyć wykresy, jeśli RStudio je nadpisuje
+  Sys.sleep(2) 
+}
